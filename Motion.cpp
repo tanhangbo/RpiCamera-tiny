@@ -65,13 +65,13 @@ bool detect_motion(IplImage *frame1, IplImage *frame2, IplImage *frame3)
 
 CvVideoWriter *create_video(CvVideoWriter **video_writer, IplImage *frame)
 {
-	char video_path[50] = {0};
+	char video_path[100] = {0};
 	time_t current_time;
 	struct tm * time_info;
 	memset(video_path, 0, sizeof(video_path));
 	time(&current_time);
 	time_info = localtime(&current_time);
-	strftime(video_path, 50, "./record/avi/%m%d_%H%M%S.avi", time_info);
+	strftime(video_path, 100, "/home/pi/HDD/RpiCamera-tiny/record/avi/%m%d_%H%M%S.avi", time_info);
 	printf("creating video:%s\n", video_path);
 	*video_writer =  cvCreateVideoWriter(video_path,
 				CV_FOURCC('M', 'J', 'P', 'G'), 25.0, cvGetSize(frame));
