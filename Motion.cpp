@@ -13,7 +13,8 @@ using namespace std;
 #define CAMERA_INDEX 0
 /* seconds for record time */
 #define VIDEO_COUNT 30
-
+/* low FPS on slow Rpi machine */
+#define VIDEO_FPS 5
 
 queue<IplImage *> webcam_buf;
 
@@ -71,10 +72,10 @@ CvVideoWriter *create_video(CvVideoWriter **video_writer, IplImage *frame)
 	memset(video_path, 0, sizeof(video_path));
 	time(&current_time);
 	time_info = localtime(&current_time);
-	strftime(video_path, 100, "/home/pi/HDD/RpiCamera-tiny/record/avi/%m%d_%H%M%S.avi", time_info);
+	strftime(video_path, 100, "./record/avi/%m%d_%H%M%S.avi", time_info);
 	printf("creating video:%s\n", video_path);
 	*video_writer =  cvCreateVideoWriter(video_path,
-				CV_FOURCC('M', 'J', 'P', 'G'), 25.0, cvGetSize(frame));
+				CV_FOURCC('M', 'J', 'P', 'G'), VIDEO_FPS, cvGetSize(frame));
 
 }
 
@@ -147,7 +148,7 @@ void* dispatch_thread(void *arg)
 			init_step++;
 			continue;
 		} else {
-			//printf("start to detect!!!\n");
+			//printf("detecting!!!\n");
 		}
 
 		/* detect process */
@@ -158,7 +159,7 @@ void* dispatch_thread(void *arg)
 			motion_detected = true;
 		}
 
-		/* sleep here to be detected */
+		/* sleep here to release CPU resource */
 		while (motion_detected == true)
 			sleep(1);
 
@@ -195,22 +196,50 @@ void rhm_start_threads()
 }
 
 
-
 /*
 
-on ubuntu:
-
-libhighgui-dev extra.
+	Remember no need to release the buffer of frame
 
 */
+void start_to_record(CvCapture *capture, IplImage *frame)
+{
+	CvVideoWriter *video_writer = NULL;
+	int video_count = 0;
+
+	create_video(&video_writer, frame);
+	cvWriteFrame(video_writer, frame);
+
+	time_t start;
+	time_t end;  
+	double time_cost;  
+	time(&start);
+
+	printf(">>>>>>>start to record\n");
+	while (true) {
+		frame = cvQueryFrame(capture);
+		if (!frame) {
+			printf("\n critical error when capture\n");
+			break;
+		}
+		cvWriteFrame(video_writer, frame);
+
+		time(&end);  
+		if (difftime(end,start) > VIDEO_COUNT)
+			break;
+
+	}
+	cvReleaseVideoWriter(&video_writer);
+	motion_detected = false;
+	printf(">>>>>>>end of record for %d seconds\n", VIDEO_COUNT);
+
+}
+
+
 int main(int argc,char **argv)
 {
 
 	IplImage *frame = NULL;
 	CvCapture *capture = NULL;
-
-	int video_count = 0;
-	CvVideoWriter *video_writer = NULL;
 
 	rhm_prepare_capture(&capture);
 	rhm_start_threads();
@@ -235,32 +264,7 @@ int main(int argc,char **argv)
 			frame_lock.unlock();
 			sleep(1);
 		} else {
-		
-			create_video(&video_writer, frame);
-			cvWriteFrame(video_writer, frame);
-
-			time_t start;
-			time_t end;  
-			double time_cost;  
-			time(&start);
-
-			printf(">>>>>>>start to record\n");
-			while (true) {
-				frame = cvQueryFrame(capture);
-				if (!frame) {
-					printf("\n critical error when capture\n");
-					break;
-				}
-				cvWriteFrame(video_writer, frame);
-
-				time(&end);  
-				if (difftime(end,start) > VIDEO_COUNT)
-					break;
-
-			}
-			cvReleaseVideoWriter(&video_writer);
-			motion_detected = false;
-			printf(">>>>>>>end of record for %d seconds\n", VIDEO_COUNT);
+			start_to_record(capture, frame);
 		}
 
 	}
