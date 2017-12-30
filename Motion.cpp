@@ -16,6 +16,8 @@ using namespace std;
 /* low FPS on slow Rpi machine */
 #define VIDEO_FPS 5
 
+#define DETECT_THRESHOLD 100
+
 queue<IplImage *> webcam_buf;
 
 
@@ -56,7 +58,7 @@ bool detect_motion(IplImage *frame1, IplImage *frame2, IplImage *frame3)
 
 	cvErode(frame_result1, frame_result1, 0, ERODE_TIMES);
 	black_pixels = cvCountNonZero(frame_result1);
-	if (black_pixels > 500) {
+	if (black_pixels > DETECT_THRESHOLD) {
 		printf("MOTION_%d!\n", black_pixels);
 		return true;
 	}
@@ -72,7 +74,7 @@ CvVideoWriter *create_video(CvVideoWriter **video_writer, IplImage *frame)
 	memset(video_path, 0, sizeof(video_path));
 	time(&current_time);
 	time_info = localtime(&current_time);
-	strftime(video_path, 100, "./record/avi/%m%d_%H%M%S.avi", time_info);
+	strftime(video_path, 100, "./%m%d_%H%M%S.avi", time_info);
 	printf("creating video:%s\n", video_path);
 	*video_writer =  cvCreateVideoWriter(video_path,
 				CV_FOURCC('M', 'J', 'P', 'G'), VIDEO_FPS, cvGetSize(frame));
@@ -125,37 +127,27 @@ void* dispatch_thread(void *arg)
 
 		/* we got here when frame is ready and resolution is got */
 		if (frame1 == NULL) {
-			frame1 =  cvCreateImage(cvGetSize(frame),frame->depth,3);
-			frame2 =  cvCreateImage(cvGetSize(frame),frame->depth,3);
-			frame3 =  cvCreateImage(cvGetSize(frame),frame->depth,3);
+			/** init create frames */
 			frame_gray1 = cvCreateImage(cvGetSize(frame),frame->depth,1);
 			frame_gray2 = cvCreateImage(cvGetSize(frame),frame->depth,1);
 			frame_gray3 = cvCreateImage(cvGetSize(frame),frame->depth,1);
 			frame_result1 = cvCreateImage(cvGetSize(frame),frame->depth,1);	
 		}
 
-		/* 
-			copy for detect,release after copy
-			cur_frame -> frame3 -> frame2 -> frame1 
-		*/
-		cvCopy(frame2, frame1);
-		cvCopy(frame3, frame2);
-		cvCopy(frame, frame3);
-		cvReleaseImage(&frame);
+		/* cur_frame -> frame3 -> frame2 -> frame1 */
+		if (NULL != frame1)
+			cvReleaseImage(&frame1);
+		frame1 = frame2;
+		frame2 = frame3;
+		frame3 = frame;
 
-		/* wait until copy done */
-		if (init_step < 3) {
-			init_step++;
+		/** the cur_frame -> frame3 -> frame2 -> frame1 init action is not done*/
+		if (NULL == frame1)
 			continue;
-		} else {
-			//printf("detecting!!!\n");
-		}
-
+		
 		/* detect process */
 		if(detect_motion(frame1, frame2, frame3)) {
 			printf("detected!!!\n");
-			/* need to copy again afterwards */
-			init_step = 0;
 			motion_detected = true;
 		}
 
@@ -199,6 +191,8 @@ void rhm_start_threads()
 /*
 
 	Remember no need to release the buffer of frame
+	
+	this is the bottleneck of the project
 
 */
 void start_to_record(CvCapture *capture, IplImage *frame)
@@ -255,6 +249,7 @@ int main(int argc,char **argv)
 		}
 
 
+		/** Case 1: detect the motion in another thread  */
 		if (false == motion_detected) {
 			/* enqueue a frame, must be copied before enqueued */
 			frame_lock.lock();
@@ -262,8 +257,9 @@ int main(int argc,char **argv)
 			cvCopy(frame, frame_copy);
 			webcam_buf.push(frame_copy);
 			frame_lock.unlock();
-			sleep(1);
+			sleep(1); /* the time difference between two frames */
 		} else {
+		/** Case 2: the motion is detected, record it. */
 			start_to_record(capture, frame);
 		}
 
